@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 )
 
 // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
@@ -40,7 +41,27 @@ func handleConn(conn net.Conn) {
 			return
 		}
 
-		fmt.Println("Received data", string(buf[:n]))
-		conn.Write([]byte("+PONG\r\n"))
+		// fmt.Println("Received data", string(buf[:n]))
+		reply := parseRESParray(string(buf[:n]))
+		conn.Write([]byte(reply))
 	}
+}
+
+func parseRESParray(s string) string {
+	arr := strings.Split(s, "\r\n")
+	var reply string
+
+	switch strings.ToLower(arr[2]) {
+	case "echo":
+		fmt.Println("entering ECHO")
+		strToReply := arr[4]
+		if strToReply == "" {
+			return ""
+		}
+		reply = fmt.Sprintf("$%d\r\n%s\r\n", len(strToReply), strToReply)
+	case "ping":
+		fmt.Println("entering PING")
+		reply = "$4\r\nPONG\r\n"
+	}
+	return reply
 }
