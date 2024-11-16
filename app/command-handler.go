@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,19 +10,28 @@ import (
 )
 
 type StoredValue struct {
-	val       string
-	validTill time.Time
+	val     string
+	expires time.Time
 }
 
 type CommandHandler struct {
-	data map[string]StoredValue
-	mu   sync.RWMutex
+	data   map[string]StoredValue
+	config map[string]string
+	mu     sync.RWMutex
 }
 
 func NewCommandHandler() *CommandHandler {
+	dir := flag.String("dir", "", "")
+	dbfilename := flag.String("dbfilename", "", "")
+	flag.Parse()
+
 	data := make(map[string]StoredValue)
+	config := make(map[string]string)
+	config["dir"] = *dir
+	config["dbfilename"] = *dbfilename
 	return &CommandHandler{
-		data: data,
+		data:   data,
+		config: config,
 	}
 }
 
@@ -32,6 +42,7 @@ type setOptions struct {
 func (ch *CommandHandler) HandleCommand(v Value) []byte {
 	if v.vType == "array" {
 		command := strings.ToLower(v.array[0].bulk)
+		fmt.Println(command)
 		switch command {
 		case "ping":
 			return []byte("+PONG\r\n")
@@ -52,6 +63,16 @@ func (ch *CommandHandler) HandleCommand(v Value) []byte {
 				return []byte("$-1\r\n")
 			}
 			return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(val), val))
+		case "config":
+			arg := strings.ToLower(v.array[1].bulk)
+			if arg == "get" {
+				key := v.array[2].bulk
+				val, present := ch.config[key]
+				if !present {
+					return []byte("$-1\r\n")
+				}
+				return []byte(fmt.Sprintf("*2\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(key), key, len(val), val))
+			}
 		}
 	} else {
 		return []byte("$5\r\nERROR\r\n")
@@ -68,7 +89,7 @@ func (ch *CommandHandler) setValue(key, val string, opts setOptions) {
 	var now time.Time
 	if opts.PX != 0 {
 		now = time.Now()
-		newVal.validTill = now.Add(time.Millisecond * time.Duration(opts.PX))
+		newVal.expires = now.Add(time.Millisecond * time.Duration(opts.PX))
 	}
 	ch.data[key] = newVal
 }
@@ -95,9 +116,9 @@ func (ch *CommandHandler) getValue(key string) string {
 		return ""
 	}
 
-	if !v.validTill.IsZero() {
-		lost := v.validTill.Before(time.Now())
-		if lost {
+	if !v.expires.IsZero() {
+		isLost := v.expires.Before(time.Now())
+		if isLost {
 			return ""
 		}
 	}
