@@ -15,9 +15,10 @@ type StoredValue struct {
 }
 
 type CommandHandler struct {
-	data   map[string]StoredValue
-	config map[string]string
-	mu     sync.RWMutex
+	data    map[string]StoredValue
+	config  map[string]string
+	rdbconn *RDBconn
+	mu      sync.RWMutex
 }
 
 func NewCommandHandler() *CommandHandler {
@@ -30,8 +31,9 @@ func NewCommandHandler() *CommandHandler {
 	config["dir"] = *dir
 	config["dbfilename"] = *dbfilename
 	return &CommandHandler{
-		data:   data,
-		config: config,
+		data:    data,
+		config:  config,
+		rdbconn: NewRDBconn(*dir, *dbfilename),
 	}
 }
 
@@ -73,6 +75,24 @@ func (ch *CommandHandler) HandleCommand(v Value) []byte {
 				}
 				return []byte(fmt.Sprintf("*2\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(key), key, len(val), val))
 			}
+		case "keys":
+			pattern := v.array[1].bulk
+			keys, err := ch.rdbconn.GetKeysWithPattern(pattern)
+			if err != nil {
+				fmt.Println("error getting keys", err)
+				return nil
+			}
+			fmt.Printf("%x\n", keys)
+			if len(keys) == 0 {
+				return []byte("*0\r\n")
+			}
+			reply := []byte(fmt.Sprintf("*%d\r\n", len(keys)))
+			for i := 0; i < len(keys); i++ {
+				reply = append(reply, []byte(fmt.Sprintf("$%d\r\n", len(keys[i])))...)
+				reply = append(reply, keys[i]...)
+				reply = append(reply, []byte("\r\n")...)
+			}
+			return reply
 		}
 	} else {
 		return []byte("$5\r\nERROR\r\n")

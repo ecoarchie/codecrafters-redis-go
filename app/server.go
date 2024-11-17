@@ -7,6 +7,24 @@ import (
 )
 
 func main() {
+	// file, err := os.Open("dump.rdb")
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	os.Exit(1)
+	// }
+	// defer file.Close()
+
+	// scanner := bufio.NewScanner(file)
+	// scanner.Split(bufio.ScanBytes)
+	// bytes := []byte{}
+	// for scanner.Scan() {
+	// 	bytes = append(bytes, scanner.Bytes()...)
+	// }
+
+	// for _, b := range bytes {
+	// 	fmt.Println(b)
+	// }
+
 	fmt.Println("Logs from your program will appear here!")
 
 	l, err := net.Listen("tcp", "0.0.0.0:6379")
