@@ -26,14 +26,20 @@ func NewCommandHandler() *CommandHandler {
 	dbfilename := flag.String("dbfilename", "", "")
 	flag.Parse()
 
-	data := make(map[string]StoredValue)
 	config := make(map[string]string)
 	config["dir"] = *dir
 	config["dbfilename"] = *dbfilename
+
+	rdbConn := NewRDBconn(*dir, *dbfilename)
+
+	data := make(map[string]StoredValue)
+	if rdbConn != nil {
+		data, _ = rdbConn.LoadFromRDStoMemory()
+	}
 	return &CommandHandler{
 		data:    data,
 		config:  config,
-		rdbconn: NewRDBconn(*dir, *dbfilename),
+		rdbconn: rdbConn,
 	}
 }
 
@@ -41,6 +47,7 @@ type setOptions struct {
 	PX int
 }
 
+// FIXME rewrite this ugly function
 func (ch *CommandHandler) HandleCommand(v Value) []byte {
 	if v.vType == "array" {
 		command := strings.ToLower(v.array[0].bulk)

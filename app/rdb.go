@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"time"
 )
 
 type bit byte
@@ -21,6 +22,7 @@ const (
 	b0 bit = 0b1000_0000
 )
 
+// TODO rewrite to isZeroBit
 func isBitOne(b byte, n bit) bool {
 	return b&byte(n) > 0
 }
@@ -63,6 +65,9 @@ type RDBconn struct {
 }
 
 func NewRDBconn(dir, filename string) *RDBconn {
+	if dir ==  "" && filename == "" {
+		return nil
+	}
 	return &RDBconn{
 		path: fmt.Sprintf("%s/%s", dir, filename),
 	}
@@ -78,10 +83,11 @@ func (rdb *RDBconn) openRDBfile() (*bufio.Reader, error) {
 	defer rdbFile.Close()
 
 	reader := bufio.NewReader(rdbFile)
-	err = rdb.healthCheck(reader)
+	err = healthCheck(reader)
 	if err != nil {
 		//TODO handle error
 		fmt.Println("Failed healthcheck", err)
+		// return nil, err
 		os.Exit(1)
 	}
 	return reader, nil
@@ -90,11 +96,11 @@ func (rdb *RDBconn) openRDBfile() (*bufio.Reader, error) {
 func (rdb *RDBconn) GetKeysWithPattern(pattern string) (keys [][]byte, err error) {
 	reader, err := rdb.openRDBfile()
 	if err != nil {
-	// treat db as empty
+		// treat db as empty
 		return nil, nil
 	}
 	// read till FB - indicates a resizedb field, which follows by 2 bytes with db size info
-	reader.ReadBytes('\xFB') 
+	reader.ReadBytes('\xFB')
 	if pattern == "*" {
 		keys = getAllKeysFrom(reader)
 	}
@@ -111,7 +117,7 @@ func getAllKeysFrom(r *bufio.Reader) [][]byte {
 		keyLength := sizeDecode(r)
 		keys[i] = make([]byte, keyLength)
 		r.Read(keys[i])
-		skipValue(r) 
+		skipValue(r)
 	}
 	return keys
 }
@@ -124,7 +130,7 @@ func skipValue(r *bufio.Reader) {
 	}
 }
 
-func (rdc *RDBconn) healthCheck(r *bufio.Reader) error {
+func healthCheck(r *bufio.Reader) error {
 	magicString, err := r.Peek(5)
 	if err != nil {
 		return err
@@ -133,4 +139,37 @@ func (rdc *RDBconn) healthCheck(r *bufio.Reader) error {
 		return fmt.Errorf("error not a rdb file")
 	}
 	return nil
+}
+
+func (rdb *RDBconn) LoadFromRDStoMemory() (map[string]StoredValue, error) {
+	store := make(map[string]StoredValue)
+	reader, err := rdb.openRDBfile()
+	if err != nil {
+		return nil, err
+	}
+	// read till FB - indicates a resizedb field, which follows by 2 bytes with db size info
+	reader.ReadBytes('\xFB')
+	// sizeDecode(reader) // size of the corresponding hash table
+	reader.Discard(2) // skip size of the corresponding expire hash table
+	for {
+		byt, err := reader.ReadByte() // skip type of value encoding byte
+		if err != nil || byt == '\xFF' {
+			break
+		}
+		keyLength := sizeDecode(reader)
+		keyBuf := make([]byte, keyLength)
+		reader.Read(keyBuf)
+
+		valLength := sizeDecode(reader)
+		valBuf := make([]byte, valLength)
+		reader.Read(valBuf)
+		val := StoredValue{
+			val:     string(valBuf),
+			expires: time.Time{},
+		}
+		store[string(keyBuf)] = val
+
+	}
+
+	return store, nil
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"strconv"
 )
@@ -67,10 +66,8 @@ func (p *Parser) Parse() (Value, error) {
 	}
 	switch vType {
 	case ARRAY:
-		fmt.Println("received ARRAY")
 		return p.readArray()
 	case BULK:
-		fmt.Println("received BULK STRING")
 		return p.readBulk()
 	default:
 		return Value{}, nil
