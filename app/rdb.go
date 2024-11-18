@@ -35,14 +35,14 @@ func sizeDecode(r *bufio.Reader) int {
 		// case first 2 bits are 0x
 		if !isBitOne(firstByte, b1) {
 			// case first two bits are 00
-			var byteToInt uint8
+			var byteToInt int8
 			binary.Read(bytes.NewReader(buf), binary.BigEndian, &byteToInt)
 			return int(byteToInt)
 		}
 		// case first two bits are 01
 		secondByte, _ := r.ReadByte()
 		buf = append(buf, secondByte)
-		var byteToInt uint16
+		var byteToInt int16
 		binary.Read(bytes.NewReader(buf), binary.BigEndian, &byteToInt)
 		return int(byteToInt)
 	}
@@ -65,7 +65,7 @@ type RDBconn struct {
 }
 
 func NewRDBconn(dir, filename string) *RDBconn {
-	if dir ==  "" && filename == "" {
+	if dir == "" && filename == "" {
 		return nil
 	}
 	return &RDBconn{
@@ -149,12 +149,18 @@ func (rdb *RDBconn) LoadFromRDStoMemory() (map[string]StoredValue, error) {
 	}
 	// read till FB - indicates a resizedb field, which follows by 2 bytes with db size info
 	reader.ReadBytes('\xFB')
-	// sizeDecode(reader) // size of the corresponding hash table
-	reader.Discard(2) // skip size of the corresponding expire hash table
+	reader.Discard(2) // skip size of the corresponding hash table and expire hash table
 	for {
-		byt, err := reader.ReadByte() // skip type of value encoding byte
+		byt, err := reader.ReadByte()
 		if err != nil || byt == '\xFF' {
 			break
+		}
+		if byt == '\xFE' {
+			continue
+		}
+		var expires time.Time
+		if byt == '\xFD' || byt == '\xFC' {
+			expires = getExpireDate(byt, reader)
 		}
 		keyLength := sizeDecode(reader)
 		keyBuf := make([]byte, keyLength)
@@ -165,11 +171,32 @@ func (rdb *RDBconn) LoadFromRDStoMemory() (map[string]StoredValue, error) {
 		reader.Read(valBuf)
 		val := StoredValue{
 			val:     string(valBuf),
-			expires: time.Time{},
+			expires: expires,
 		}
 		store[string(keyBuf)] = val
-
 	}
-
 	return store, nil
+}
+
+func getExpireDate(b byte, r *bufio.Reader) time.Time {
+	var expires time.Time
+	// expiry time in seconds followed by 4 byte unsigned int
+	if b == '\xFD' {
+		var expiresInt32 uint32
+		expireBytes := make([]byte, 4)
+		r.Read(expireBytes)
+		binary.Read(bytes.NewReader(expireBytes), binary.LittleEndian, &expiresInt32)
+		expires = time.Unix(int64(expiresInt32), 0)
+	}
+	// expiry time in milliseconds followed by 8 byte unsigned long
+	if b == '\xFC' {
+		var expiresInt64 uint64
+		expireBytes := make([]byte, 8)
+		r.Read(expireBytes)
+		binary.Read(bytes.NewReader(expireBytes), binary.LittleEndian, &expiresInt64)
+		expires = time.UnixMilli(int64(expiresInt64))
+	}
+	//TODO add encoding type prcessing
+	r.ReadByte() // skip encoding byte
+	return expires
 }
