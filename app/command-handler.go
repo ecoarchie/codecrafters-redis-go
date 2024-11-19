@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"strconv"
 	"strings"
@@ -16,21 +15,12 @@ type StoredValue struct {
 
 type CommandHandler struct {
 	data    map[string]StoredValue
-	config  map[string]string
 	rdbconn *RDBconn
 	mu      sync.RWMutex
 }
 
-func NewCommandHandler() *CommandHandler {
-	dir := flag.String("dir", "", "")
-	dbfilename := flag.String("dbfilename", "", "")
-	flag.Parse()
-
-	config := make(map[string]string)
-	config["dir"] = *dir
-	config["dbfilename"] = *dbfilename
-
-	rdbConn := NewRDBconn(*dir, *dbfilename)
+func NewCommandHandler(dir, dbfilename string) *CommandHandler {
+	rdbConn := NewRDBconn(dir, dbfilename)
 
 	data := make(map[string]StoredValue)
 	if rdbConn != nil {
@@ -38,7 +28,6 @@ func NewCommandHandler() *CommandHandler {
 	}
 	return &CommandHandler{
 		data:    data,
-		config:  config,
 		rdbconn: rdbConn,
 	}
 }
@@ -76,9 +65,12 @@ func (ch *CommandHandler) HandleCommand(v Value) []byte {
 			arg := strings.ToLower(v.array[1].bulk)
 			if arg == "get" {
 				key := v.array[2].bulk
-				val, present := ch.config[key]
-				if !present {
-					return []byte("$-1\r\n")
+				var val string
+				if key == "dir" {
+					val = ch.rdbconn.dir
+				}
+				if key == "dbfilename" {
+					val = ch.rdbconn.dbfilename
 				}
 				return []byte(fmt.Sprintf("*2\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(key), key, len(val), val))
 			}

@@ -61,7 +61,8 @@ func sizeDecode(r *bufio.Reader) int {
 }
 
 type RDBconn struct {
-	path string
+	dir        string
+	dbfilename string
 }
 
 func NewRDBconn(dir, filename string) *RDBconn {
@@ -69,12 +70,14 @@ func NewRDBconn(dir, filename string) *RDBconn {
 		return nil
 	}
 	return &RDBconn{
-		path: fmt.Sprintf("%s/%s", dir, filename),
+		dir:        dir,
+		dbfilename: filename,
+		// path: fmt.Sprintf("%s/%s", dir, filename),
 	}
 }
 
 func (rdb *RDBconn) openRDBfile() (*bufio.Reader, error) {
-	rdbFile, err := os.Open(rdb.path)
+	rdbFile, err := os.Open(rdb.dir + "/" + rdb.dbfilename)
 	if err != nil {
 		// treat db as empty
 		//TODO create 'no file error' type

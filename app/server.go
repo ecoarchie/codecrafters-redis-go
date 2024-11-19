@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -9,14 +10,22 @@ import (
 func main() {
 	fmt.Println("Logs from your program will appear here!")
 
-	l, err := net.Listen("tcp", "0.0.0.0:6379")
-	if err != nil {
-		fmt.Println("Failed to bind to port 6379")
-		os.Exit(1)
-	}
-	defer l.Close()
+	config := make(map[string]string)
+	dir := flag.String("dir", "", "")
+	dbfilename := flag.String("dbfilename", "", "")
+	host := flag.String("host", "0.0.0.0", "")
+	port := flag.String("port", "6379", "")
+	
+	flag.Parse()
 
-	r := NewRedis()
+	config["dir"] = *dir
+	config["dbfilename"] = *dbfilename
+	config["host"] = *host
+	config["port"] = *port
+
+	r := NewRedis(config)
+	l := r.ListenPort()
+	defer l.Close()
 
 	for {
 		conn, err := l.Accept()
@@ -30,11 +39,23 @@ func main() {
 
 type Redis struct {
 	commandHandler CommandHandler
+	config         map[string]string
 }
 
-func NewRedis() *Redis {
+func (r *Redis) ListenPort() net.Listener {
+	address := r.config["host"] +":" + r.config["port"]
+	l, err := net.Listen("tcp", address)
+	if err != nil {
+		fmt.Println("Failed to bind to port 6379")
+		os.Exit(1)
+	}
+	return l
+}
+
+func NewRedis(config map[string]string) *Redis {
 	return &Redis{
-		commandHandler: *NewCommandHandler(),
+		commandHandler: *NewCommandHandler(config["dir"], config["dbfilename"]),
+		config:         config,
 	}
 }
 
