@@ -97,7 +97,7 @@ func (ch *CommandHandler) HandleCommand(v Value) []byte {
 		case "info":
 			arg := strings.ToLower(v.array[1].bulk)
 			if arg == "replication" {
-				return ch.config.replication.ByteString()
+				return ch.config.replConf.ByteString()
 			}
 		}
 	} else {
