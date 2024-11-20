@@ -72,7 +72,6 @@ func NewRDBconn(dir, filename string) *RDBconn {
 	return &RDBconn{
 		dir:        dir,
 		dbfilename: filename,
-		// path: fmt.Sprintf("%s/%s", dir, filename),
 	}
 }
 

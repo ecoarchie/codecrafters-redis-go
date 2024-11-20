@@ -10,20 +10,25 @@ import (
 func main() {
 	fmt.Println("Logs from your program will appear here!")
 
-	config := make(map[string]string)
+	redisConfig := new(RedisConfig)
+
+	// config := make(map[string]string)
 	dir := flag.String("dir", "", "")
 	dbfilename := flag.String("dbfilename", "", "")
 	host := flag.String("host", "0.0.0.0", "")
 	port := flag.String("port", "6379", "")
-	
+
 	flag.Parse()
 
-	config["dir"] = *dir
-	config["dbfilename"] = *dbfilename
-	config["host"] = *host
-	config["port"] = *port
+	redisConfig.rds.dir = *dir
+	redisConfig.rds.dbfilename = *dbfilename
+	redisConfig.replication.host = *host
+	redisConfig.replication.port = *port
+	if *port == "6379" {
+		redisConfig.replication.replication.role = "master"
+	}
 
-	r := NewRedis(config)
+	r := NewRedis(redisConfig)
 	l := r.ListenPort()
 	defer l.Close()
 
@@ -37,26 +42,51 @@ func main() {
 	}
 }
 
+type RDSconfig struct {
+	dir        string
+	dbfilename string
+}
+
+type ReplicationConfig struct {
+	host        string
+	port        string
+	replication struct {
+		role string
+	}
+}
+
+func (rc *ReplicationConfig) ByteString() []byte {
+	roleStr := []byte(fmt.Sprintf("$%d\r\n%s:%s\r\n", len("role:")+len(rc.replication.role), "role", rc.replication.role))
+	return roleStr
+}
+
+type RedisConfig struct {
+	rds         RDSconfig
+	replication ReplicationConfig
+}
+
 type Redis struct {
 	commandHandler CommandHandler
-	config         map[string]string
+	config         *RedisConfig
+	// config         map[string]string
+}
+
+func NewRedis(config *RedisConfig) *Redis {
+	return &Redis{
+		commandHandler: *NewCommandHandler(config),
+		config:         config,
+	}
 }
 
 func (r *Redis) ListenPort() net.Listener {
-	address := r.config["host"] +":" + r.config["port"]
+	address := r.config.replication.host + ":" + r.config.replication.port
 	l, err := net.Listen("tcp", address)
 	if err != nil {
 		fmt.Println("Failed to bind to port 6379")
 		os.Exit(1)
 	}
+	fmt.Println("Server is listening on port", r.config.replication.port)
 	return l
-}
-
-func NewRedis(config map[string]string) *Redis {
-	return &Redis{
-		commandHandler: *NewCommandHandler(config["dir"], config["dbfilename"]),
-		config:         config,
-	}
 }
 
 func (r *Redis) handleConn(conn net.Conn) {

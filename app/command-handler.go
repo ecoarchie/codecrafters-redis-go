@@ -16,11 +16,12 @@ type StoredValue struct {
 type CommandHandler struct {
 	data    map[string]StoredValue
 	rdbconn *RDBconn
+	config  *RedisConfig
 	mu      sync.RWMutex
 }
 
-func NewCommandHandler(dir, dbfilename string) *CommandHandler {
-	rdbConn := NewRDBconn(dir, dbfilename)
+func NewCommandHandler(config *RedisConfig) *CommandHandler {
+	rdbConn := NewRDBconn(config.rds.dir, config.rds.dbfilename)
 
 	data := make(map[string]StoredValue)
 	if rdbConn != nil {
@@ -29,6 +30,7 @@ func NewCommandHandler(dir, dbfilename string) *CommandHandler {
 	return &CommandHandler{
 		data:    data,
 		rdbconn: rdbConn,
+		config:  config,
 	}
 }
 
@@ -92,6 +94,11 @@ func (ch *CommandHandler) HandleCommand(v Value) []byte {
 				reply = append(reply, []byte("\r\n")...)
 			}
 			return reply
+		case "info":
+			arg := strings.ToLower(v.array[1].bulk)
+			if arg == "replication" {
+				return ch.config.replication.ByteString()
+			}
 		}
 	} else {
 		return []byte("$5\r\nERROR\r\n")
