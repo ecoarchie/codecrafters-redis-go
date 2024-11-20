@@ -40,7 +40,10 @@ func main() {
 
 	r := NewRedis(redisConfig)
 	if r.config.replConf.replication.role == "slave" {
-		r.PingMaster()
+		err := r.Handshake()
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
 	l := r.ListenPort()
 	defer l.Close()

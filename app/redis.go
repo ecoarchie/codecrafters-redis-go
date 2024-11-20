@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"net"
 	"os"
@@ -58,20 +59,61 @@ func NewRedis(config *RedisConfig) *Redis {
 	}
 }
 
-func (r *Redis) PingMaster() {
+func (r *Redis) Handshake() error {
+	conn, err := r.PingMaster()
+	if err != nil {
+		return err
+	}
+	ok, err := bufio.NewReader(conn).ReadString('\r')
+	if ok != "+PONG\r" {
+		fmt.Println("ok is ", ok)
+		return fmt.Errorf("wrong reply")
+	}
+	if err != nil {
+		return err
+	}
+
+	err = r.ReplConf(conn)
+	if err != nil {
+		return err
+	}
+	conn.Close()
+	return nil
+}
+
+func (r *Redis) PingMaster() (net.Conn, error) {
 	addr := fmt.Sprintf("%s:%s", r.config.replConf.replication.master_host, r.config.replConf.replication.master_port)
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		fmt.Println(err)
-		return
+		return nil, err
 	}
-	defer conn.Close()
 
 	if _, err = conn.Write([]byte("*1\r\n$4\r\nPING\r\n")); err != nil {
 		fmt.Println(err)
-		return
+		return nil, err
+	}
+	return conn, nil
+}
+
+func (r *Redis) ReplConf(conn net.Conn) error {
+	_, err := conn.Write([]byte(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n%s\r\n", r.config.replConf.port)))
+	if err != nil {
+		return err
+	}
+	ok, err := bufio.NewReader(conn).ReadString('\r')
+	if ok != "+OK\r" {
+		return fmt.Errorf("wrong reply")
+	}
+	if err != nil {
+		return err
 	}
 
+	_, err = conn.Write([]byte("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"))
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *Redis) ListenPort() net.Listener {
