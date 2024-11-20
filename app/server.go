@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -32,9 +33,15 @@ func main() {
 
 	} else {
 		redisConfig.replConf.replication.role = "slave"
+		addr := strings.Split(*replicaof, " ")
+		redisConfig.replConf.replication.master_host = addr[0]
+		redisConfig.replConf.replication.master_port = addr[1]
 	}
 
 	r := NewRedis(redisConfig)
+	if r.config.replConf.replication.role == "slave" {
+		r.PingMaster()
+	}
 	l := r.ListenPort()
 	defer l.Close()
 

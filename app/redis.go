@@ -19,6 +19,8 @@ type ReplicationConfig struct {
 		role               string
 		master_replid      string
 		master_repl_offset int
+		master_host        string
+		master_port        string
 	}
 }
 
@@ -33,7 +35,7 @@ func (rc *ReplicationConfig) ByteString() []byte {
 	arr = append(arr, masterReplID)
 	arr = append(arr, masterReplOffset)
 	resStr := strings.Join(arr, "\r\n")
-	
+
 	len := len(resStr)
 	reply := fmt.Sprintf("$%d\r\n%s\r\n", len, resStr)
 	return []byte(reply)
@@ -54,6 +56,22 @@ func NewRedis(config *RedisConfig) *Redis {
 		commandHandler: *NewCommandHandler(config),
 		config:         config,
 	}
+}
+
+func (r *Redis) PingMaster() {
+	addr := fmt.Sprintf("%s:%s", r.config.replConf.replication.master_host, r.config.replConf.replication.master_port)
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer conn.Close()
+
+	if _, err = conn.Write([]byte("*1\r\n$4\r\nPING\r\n")); err != nil {
+		fmt.Println(err)
+		return
+	}
+
 }
 
 func (r *Redis) ListenPort() net.Listener {
