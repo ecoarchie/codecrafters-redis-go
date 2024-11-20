@@ -18,14 +18,20 @@ func main() {
 	host := flag.String("host", "0.0.0.0", "")
 	port := flag.String("port", "6379", "")
 
+	replicaof := flag.String("replicaof", "", "")
+
 	flag.Parse()
+
+	fmt.Println("replicaof flag = ", *replicaof == "")
 
 	redisConfig.rds.dir = *dir
 	redisConfig.rds.dbfilename = *dbfilename
 	redisConfig.replication.host = *host
 	redisConfig.replication.port = *port
-	if *port == "6379" {
+	if *replicaof == "" {
 		redisConfig.replication.replication.role = "master"
+	} else {
+		redisConfig.replication.replication.role = "slave"
 	}
 
 	r := NewRedis(redisConfig)
