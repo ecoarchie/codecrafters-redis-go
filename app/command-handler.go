@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -103,12 +104,28 @@ func (ch *CommandHandler) HandleCommand(v Value) []byte {
 			return []byte("+OK\r\n")
 		case "psync":
 			reply := fmt.Sprintf("+FULLRESYNC %s %d\r\n", ch.config.replConf.replication.master_replid, ch.config.replConf.replication.master_repl_offset)
-			return []byte(reply)
+			emptyRDB := "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2"
+
+			decoded, _ := hex.DecodeString(emptyRDB)
+
+			var res []byte
+			res = append(res, []byte(reply)...)
+			res = append(res, []byte(fmt.Sprintf("$%d\r\n", len(decoded)))...)
+			res = append(res, decoded...)
+			return res
 		}
 	} else {
 		return []byte("$5\r\nERROR\r\n")
 	}
 	return []byte("+OK\r\n")
+}
+
+func Hex2Bin(src string) (string, error) {
+	ui, err := strconv.ParseUint(src, 16, 64)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%0176b", ui), nil
 }
 
 func (ch *CommandHandler) setValue(key, val string, opts setOptions) {
