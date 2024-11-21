@@ -99,6 +99,11 @@ func (ch *CommandHandler) HandleCommand(v Value) []byte {
 			if arg == "replication" {
 				return ch.config.replConf.ByteString()
 			}
+		case "replconf":
+			return []byte("+OK\r\n")
+		case "psync":
+			reply := fmt.Sprintf("+FULLRESYNC %s %d\r\n", ch.config.replConf.replication.master_replid, ch.config.replConf.replication.master_repl_offset)
+			return []byte(reply)
 		}
 	} else {
 		return []byte("$5\r\nERROR\r\n")
