@@ -64,16 +64,22 @@ func (r *Redis) Handshake() error {
 	if err != nil {
 		return err
 	}
-	ok, err := bufio.NewReader(conn).ReadString('\r')
+	rdbuff := bufio.NewReader(conn)
+	ok, err := rdbuff.ReadString('\r')
 	if ok != "+PONG\r" {
 		fmt.Println("ok is ", ok)
-		return fmt.Errorf("wrong reply")
+		return fmt.Errorf("didn't receive PONG, received %s instead", ok)
 	}
 	if err != nil {
 		return err
 	}
 
-	err = r.ReplConf(conn)
+	err = r.ReplConf(conn, rdbuff)
+	if err != nil {
+		return err
+	}
+
+	err = r.Psync(conn, rdbuff)
 	if err != nil {
 		return err
 	}
@@ -96,23 +102,50 @@ func (r *Redis) PingMaster() (net.Conn, error) {
 	return conn, nil
 }
 
-func (r *Redis) ReplConf(conn net.Conn) error {
+func (r *Redis) ReplConf(conn net.Conn, buff *bufio.Reader) error {
+	buff.Reset(conn)
 	_, err := conn.Write([]byte(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n%s\r\n", r.config.replConf.port)))
 	if err != nil {
 		return err
 	}
-	ok, err := bufio.NewReader(conn).ReadString('\r')
+	ok, err := buff.ReadString('\r')
+	// ok, err := bufio.NewReader(conn).ReadString('\r')
 	if ok != "+OK\r" {
-		return fmt.Errorf("wrong reply")
+		return fmt.Errorf("error REPLCONF with listening port error, received %s", ok)
 	}
 	if err != nil {
 		return err
 	}
 
+	buff.Reset(conn)
 	_, err = conn.Write([]byte("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"))
 	if err != nil {
 		return err
 	}
+	ok, err = buff.ReadString('\r')
+	// ok, err = bufio.NewReader(conn).ReadString('\r')
+	if ok != "+OK\r" {
+		return fmt.Errorf("error REPLCONF with capa, received %s", ok)
+	}
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *Redis) Psync(conn net.Conn, buff *bufio.Reader) error {
+	buff.Reset(conn)
+	_, err := conn.Write([]byte("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n"))
+	if err != nil {
+		return err
+	}
+	// ok, err := bufio.NewReader(conn).ReadString('\r')
+	// if ok != "+OK\r" {
+	// 	return fmt.Errorf("wrong reply")
+	// }
+	// if err != nil {
+	// 	return err
+	// }
 	return nil
 }
 
