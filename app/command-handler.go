@@ -9,20 +9,19 @@ import (
 	"time"
 )
 
-type StoredValue struct {
-	val     string
-	expires time.Time
-}
+const (
+	emptyRDBhash = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2"
+)
 
 type CommandHandler struct {
 	data    map[string]StoredValue
 	rdbconn *RDBconn
-	config  *RedisConfig
+	replConf *ReplicationConfig
 	mu      sync.RWMutex
 }
 
-func NewCommandHandler(config *RedisConfig) *CommandHandler {
-	rdbConn := NewRDBconn(config.rds.dir, config.rds.dbfilename)
+func NewCommandHandler(rdb *RDBconfig, repl *ReplicationConfig) *CommandHandler {
+	rdbConn := NewRDBconn(rdb.dir, rdb.dbfilename)
 
 	data := make(map[string]StoredValue)
 	if rdbConn != nil {
@@ -31,102 +30,156 @@ func NewCommandHandler(config *RedisConfig) *CommandHandler {
 	return &CommandHandler{
 		data:    data,
 		rdbconn: rdbConn,
-		config:  config,
+		replConf: repl,
 	}
+}
+
+func (ch *CommandHandler) HandleCommand(v Value) []byte {
+	var repl Value
+	if v.vType == "array" {
+		command := strings.ToLower(v.array[0].bulk)
+		fmt.Println("HANDLE COMMAND: ", command)
+		switch command {
+		case "ping":
+			return ch.ping(v)
+		case "echo":
+			return ch.echo(v)
+		case "set":
+			return ch.set(v)
+		case "get":
+			return ch.get(v)
+		case "config":
+			return ch.config(v)
+		case "keys":
+			return ch.keys(v)
+		case "info":
+			return ch.info(v)
+		case "replconf":
+			return ch.replconf(v)
+		case "psync":
+			return ch.psync(v)
+		}
+	} else {
+		return []byte("$5\r\nERROR\r\n")
+	}
+	return repl.OK()
 }
 
 type setOptions struct {
 	PX int
 }
 
-// FIXME rewrite this ugly function
-func (ch *CommandHandler) HandleCommand(v Value) []byte {
-	if v.vType == "array" {
-		command := strings.ToLower(v.array[0].bulk)
-		fmt.Println(command)
-		switch command {
-		case "ping":
-			return []byte("+PONG\r\n")
-		case "echo":
-			return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(v.array[1].bulk), v.array[1].bulk))
-		case "set":
-			key := v.array[1].bulk
-			value := v.array[2].bulk
-			var opts setOptions
-			if len(v.array) > 3 {
-				opts = ch.parseSetOpts(v.array[2:])
-			}
-			ch.setValue(key, value, opts)
-		case "get":
-			key := v.array[1].bulk
-			val := ch.getValue(key)
-			if val == "" {
-				return []byte("$-1\r\n")
-			}
-			return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(val), val))
-		case "config":
-			arg := strings.ToLower(v.array[1].bulk)
-			if arg == "get" {
-				key := v.array[2].bulk
-				var val string
-				if key == "dir" {
-					val = ch.rdbconn.dir
-				}
-				if key == "dbfilename" {
-					val = ch.rdbconn.dbfilename
-				}
-				return []byte(fmt.Sprintf("*2\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(key), key, len(val), val))
-			}
-		case "keys":
-			pattern := v.array[1].bulk
-			keys, err := ch.rdbconn.GetKeysWithPattern(pattern)
-			if err != nil {
-				fmt.Println("error getting keys", err)
-				return nil
-			}
-			fmt.Printf("%x\n", keys)
-			if len(keys) == 0 {
-				return []byte("*0\r\n")
-			}
-			reply := []byte(fmt.Sprintf("*%d\r\n", len(keys)))
-			for i := 0; i < len(keys); i++ {
-				reply = append(reply, []byte(fmt.Sprintf("$%d\r\n", len(keys[i])))...)
-				reply = append(reply, keys[i]...)
-				reply = append(reply, []byte("\r\n")...)
-			}
-			return reply
-		case "info":
-			arg := strings.ToLower(v.array[1].bulk)
-			if arg == "replication" {
-				return ch.config.replConf.ByteString()
-			}
-		case "replconf":
-			return []byte("+OK\r\n")
-		case "psync":
-			reply := fmt.Sprintf("+FULLRESYNC %s %d\r\n", ch.config.replConf.replication.master_replid, ch.config.replConf.replication.master_repl_offset)
-			emptyRDB := "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2"
+func (ch *CommandHandler) ping(_ Value) []byte {
+	repl := Value{
+		vType: "str",
+		str: "PONG",
+	}
+	return repl.Unmarshal()
+}
 
-			decoded, _ := hex.DecodeString(emptyRDB)
+func (ch *CommandHandler) echo(v Value) []byte {
+	repl := Value{
+		vType: "bulk",
+		bulk: v.array[1].bulk,
+	}
+	return repl.Unmarshal()
+}
 
-			var res []byte
-			res = append(res, []byte(reply)...)
-			res = append(res, []byte(fmt.Sprintf("$%d\r\n", len(decoded)))...)
-			res = append(res, decoded...)
-			return res
+func (ch *CommandHandler) set(v Value) []byte {
+	var repl Value
+	key := v.array[1].bulk
+	value := v.array[2].bulk
+	var opts setOptions
+	if len(v.array) > 3 {
+		opts = ch.parseSetOpts(v.array[2:])
+	}
+	ch.setValue(key, value, opts)
+	return repl.OK()
+}
+
+func (ch *CommandHandler) get(v Value) []byte {
+	key := v.array[1].bulk
+	val := ch.getValue(key)
+	var repl Value
+	repl.vType = "bulk"
+	if val == "" {
+		repl.bulk = ""
+		return repl.Unmarshal()
+	}
+	repl.bulk = val
+	return repl.Unmarshal()
+}
+
+func (ch *CommandHandler) config(v Value) []byte {
+	var repl Value
+	repl.vType = "array"
+	arg := strings.ToLower(v.array[1].bulk)
+	if arg == "get" {
+		key := v.array[2].bulk
+		repl.array = append(repl.array, Value{vType: "bulk", bulk: key})
+		if key == "dir" {
+			repl.array = append(repl.array, Value{vType: "bulk", bulk: ch.rdbconn.dir})
 		}
-	} else {
-		return []byte("$5\r\nERROR\r\n")
+		if key == "dbfilename" {
+			repl.array = append(repl.array, Value{vType: "bulk", bulk: ch.rdbconn.dbfilename})
+		}
+		return repl.Unmarshal()
 	}
-	return []byte("+OK\r\n")
+	return nil
 }
 
-func Hex2Bin(src string) (string, error) {
-	ui, err := strconv.ParseUint(src, 16, 64)
+func (ch *CommandHandler) keys(v Value) []byte {
+	var repl Value
+	repl.vType = "array"
+
+	pattern := v.array[1].bulk
+	keys, err := ch.rdbconn.GetKeysWithPattern(pattern)
 	if err != nil {
-		return "", err
+		fmt.Println("error getting keys", err)
+		return nil
 	}
-	return fmt.Sprintf("%0176b", ui), nil
+	if len(keys) == 0 {
+		return repl.Unmarshal()
+	}
+	for _, k := range keys {
+		var val Value
+		val.vType = "bulk"
+		val.bulk = string(k)
+		repl.array = append(repl.array, val)
+	}
+	return repl.Unmarshal()
 }
+
+func (ch *CommandHandler) info(v Value) []byte {
+	arg := strings.ToLower(v.array[1].bulk)
+	if arg == "replication" && ch.replConf.replication.role == "master" {
+		fmt.Println("here for master")
+		return ch.replConf.MasterInfo()
+	}
+		
+		fmt.Println("here for slave")
+
+	return ch.replConf.SlaveInfo()
+}
+
+func (ch *CommandHandler) replconf(_ Value) []byte {
+	var repl Value
+	return repl.OK()
+}
+
+func (ch *CommandHandler) psync(_ Value) []byte {
+	//TODO add check for args ? and 0 for full resync
+	reply := fmt.Sprintf("+FULLRESYNC %s %d\r\n", ch.replConf.replication.master_replid, ch.replConf.replication.master_repl_offset)
+
+	decoded, _ := hex.DecodeString(emptyRDBhash)
+
+	var res []byte
+	res = append(res, []byte(reply)...)
+	res = append(res, []byte(fmt.Sprintf("$%d\r\n", len(decoded)))...)
+	res = append(res, decoded...) //decoded RDB hash is not a bulk string so without CRLF
+	return res
+}
+
 
 func (ch *CommandHandler) setValue(key, val string, opts setOptions) {
 	ch.mu.Lock()
@@ -139,6 +192,7 @@ func (ch *CommandHandler) setValue(key, val string, opts setOptions) {
 		now = time.Now()
 		newVal.expires = now.Add(time.Millisecond * time.Duration(opts.PX))
 	}
+	//TODO add support of other options
 	ch.data[key] = newVal
 }
 

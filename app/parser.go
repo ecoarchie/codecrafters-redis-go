@@ -2,17 +2,75 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"strconv"
+	"strings"
 )
 
 type Value struct {
 	vType string //type of value
-	// str string // store RESP simple string
-	// num int // store parsed RESP number
+	str string // store RESP simple string
+	num int // store parsed RESP number
 	bulk  string  // store raw RESP bulk string
 	array []Value // store RESP array
 }
+
+func (v *Value) OK() []byte {
+		v.vType = "str"
+		v.str = "OK"
+		return v.Unmarshal()
+}
+
+func (v *Value) Unmarshal() []byte {
+	switch v.vType {
+	case "str":
+		return v.toStr()
+	case "num":
+		return v.toNum()
+	case "bulk":
+		return v.toBulk()
+	case "array":
+		return v.toArray()
+	}
+	return nil
+}
+
+func (v *Value) toStr() []byte {
+	reply := fmt.Sprintf("+%s\r\n", v.str)
+	return []byte(reply)
+}
+
+func (v *Value) toNum() []byte {
+	reply := fmt.Sprintf(":%d\r\n", v.num)
+	return []byte(reply)
+}
+
+func (v *Value) toBulk() []byte {
+	var reply string
+	if v.bulk == "" {
+		reply = "$-1\r\n"
+	} else {
+		reply = fmt.Sprintf("$%d\r\n%s\r\n", len(v.bulk), v.bulk)
+	}
+	return []byte(reply)
+}
+
+func (v *Value) toArray() []byte {
+	if len(v.array) == 0 {
+		return []byte("*0\r\n")
+	}
+	begin := fmt.Sprintf("*%d\r\n", len(v.array))
+	var vals []string
+	for _, v := range v.array {
+		length := fmt.Sprintf("$%d\r\n", len(v.bulk))
+		vals = append(vals, fmt.Sprintf("%s%s", length, v.bulk))
+	}
+	valsStr := strings.Join(vals, "\r\n")
+	reply := fmt.Sprintf("%s%s\r\n", begin, valsStr)
+	return []byte(reply)
+}
+
 
 const (
 	STRING  = '+'

@@ -10,7 +10,9 @@ import (
 func main() {
 	fmt.Println("Logs from your program will appear here!")
 
-	redisConfig := new(RedisConfig)
+	// redisConfig := new(RedisConfig)
+	rdbConf := new(RDBconfig)
+	replConf := new(ReplicationConfig)
 
 	// config := make(map[string]string)
 	dir := flag.String("dir", "", "")
@@ -21,29 +23,30 @@ func main() {
 
 	flag.Parse()
 
-	redisConfig.rds.dir = *dir
-	redisConfig.rds.dbfilename = *dbfilename
-	redisConfig.replConf.host = *host
-	redisConfig.replConf.port = *port
+	rdbConf.dir = *dir
+	rdbConf.dbfilename = *dbfilename
+	replConf.host = *host
+	replConf.port = *port
 	if *replicaof == "" {
-		redisConfig.replConf.replication.role = "master"
+		replConf.replication.role = "master"
 		//TODO make random alphanumeric string of 40 characters
-		redisConfig.replConf.replication.master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
-		redisConfig.replConf.replication.master_repl_offset = 0
+		replConf.replication.master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+		replConf.replication.master_repl_offset = 0
 
 	} else {
-		redisConfig.replConf.replication.role = "slave"
+		replConf.replication.role = "slave"
 		addr := strings.Split(*replicaof, " ")
-		redisConfig.replConf.replication.master_host = addr[0]
-		redisConfig.replConf.replication.master_port = addr[1]
+		replConf.replication.master_host = addr[0]
+		replConf.replication.master_port = addr[1]
 	}
 
-	r := NewRedis(redisConfig)
-	if r.config.replConf.replication.role == "slave" {
-		err := r.Handshake()
+	r := NewRedis(rdbConf, replConf)
+	if r.replConf.replication.role == "slave" {
+		masterConn, err := r.Handshake()
 		if err != nil {
 			fmt.Println(err)
 		}
+		go r.handleConn(masterConn)
 	}
 	l := r.ListenPort()
 	defer l.Close()
