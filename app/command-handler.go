@@ -14,10 +14,10 @@ const (
 )
 
 type CommandHandler struct {
-	data    map[string]StoredValue
-	rdbconn *RDBconn
+	data     map[string]StoredValue
+	rdbconn  *RDBconn
 	replConf *ReplicationConfig
-	mu      sync.RWMutex
+	mu       sync.RWMutex
 }
 
 func NewCommandHandler(rdb *RDBconfig, repl *ReplicationConfig) *CommandHandler {
@@ -28,8 +28,8 @@ func NewCommandHandler(rdb *RDBconfig, repl *ReplicationConfig) *CommandHandler 
 		data, _ = rdbConn.LoadFromRDStoMemory()
 	}
 	return &CommandHandler{
-		data:    data,
-		rdbconn: rdbConn,
+		data:     data,
+		rdbconn:  rdbConn,
 		replConf: repl,
 	}
 }
@@ -72,7 +72,7 @@ type setOptions struct {
 func (ch *CommandHandler) ping(_ Value) []byte {
 	repl := Value{
 		vType: "str",
-		str: "PONG",
+		str:   "PONG",
 	}
 	return repl.Unmarshal()
 }
@@ -80,7 +80,7 @@ func (ch *CommandHandler) ping(_ Value) []byte {
 func (ch *CommandHandler) echo(v Value) []byte {
 	repl := Value{
 		vType: "bulk",
-		bulk: v.array[1].bulk,
+		bulk:  v.array[1].bulk,
 	}
 	return repl.Unmarshal()
 }
@@ -153,17 +153,23 @@ func (ch *CommandHandler) keys(v Value) []byte {
 func (ch *CommandHandler) info(v Value) []byte {
 	arg := strings.ToLower(v.array[1].bulk)
 	if arg == "replication" && ch.replConf.replication.role == "master" {
-		fmt.Println("here for master")
 		return ch.replConf.MasterInfo()
 	}
-		
-		fmt.Println("here for slave")
 
 	return ch.replConf.SlaveInfo()
 }
 
-func (ch *CommandHandler) replconf(_ Value) []byte {
+func (ch *CommandHandler) replconf(v Value) []byte {
 	var repl Value
+
+	arg := strings.ToUpper(v.array[1].bulk)
+	argVal := strings.ToLower(v.array[2].bulk)
+	fmt.Println(arg, "\n", argVal)
+	if arg == "GETACK" && argVal == "*" {
+		repl.vType = "array"
+		repl.array = append(repl.array, Value{vType: "bulk", bulk: "REPLCONF"}, Value{vType: "bulk", bulk: "ACK"}, Value{vType: "bulk", bulk: "0"})
+		return repl.Unmarshal()
+	}
 	return repl.OK()
 }
 
@@ -179,7 +185,6 @@ func (ch *CommandHandler) psync(_ Value) []byte {
 	res = append(res, decoded...) //decoded RDB hash is not a bulk string so without CRLF
 	return res
 }
-
 
 func (ch *CommandHandler) setValue(key, val string, opts setOptions) {
 	ch.mu.Lock()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -50,67 +51,69 @@ func (rc *ReplicationConfig) MasterInfo() []byte {
 
 func (rc *ReplicationConfig) SlaveInfo() []byte {
 	role := fmt.Sprintf("%s:%s", "role", rc.replication.role)
-	// masterHost := rc.replication.master_host
-	// masterPort := rc.replication.master_port
 	length := len(role)
 	reply := fmt.Sprintf("$%d\r\n%s\r\n", length, role)
 	return []byte(reply)
 
 }
 
-// type RedisConfig struct {
-// 	rds      RDSconfig
-// 	replConf ReplicationConfig
-// }
-
-
 type Redis struct {
 	commandHandler *CommandHandler
-	rdbConf      *RDBconfig
-	replConf *ReplicationConfig
-	replicas []net.Conn
-	// config         *RedisConfig
+	rdbConf        *RDBconfig
+	replConf       *ReplicationConfig
+	replicas       []bufio.Writer
 }
 
 func NewRedis(rdb *RDBconfig, repl *ReplicationConfig) *Redis {
 	return &Redis{
 		commandHandler: NewCommandHandler(rdb, repl),
-		rdbConf:         rdb,
-		replConf: repl,
+		rdbConf:        rdb,
+		replConf:       repl,
 	}
 }
 
 func (r *Redis) handleConn(conn net.Conn) {
 	defer conn.Close()
 
+	addr := strings.Split(conn.RemoteAddr().String(), "]:")
+	if addr[1] == r.replConf.replication.master_port {
+		fmt.Println("HANDLING request from MASTER PORT")
+		fmt.Println("CONN: ", conn)
+	}
+
+	client := NewClient(conn)
 	for {
-		parser := NewParser(conn)
+		parser := NewParser(client.rw.Reader)
 		v, err := parser.Parse()
 		if err != nil {
+			fmt.Printf("Error is %+v\n", err)
 			return
 		}
 		reply := r.commandHandler.HandleCommand(v)
-		if v.vType == "array" && strings.ToUpper(v.array[0].bulk) == "PSYNC" {
-			r.replicas = append(r.replicas, conn)
-		}
 		if r.replConf.replication.role == "master" {
+			if v.vType == "array" && strings.ToUpper(v.array[0].bulk) == "PSYNC" {
+				r.replicas = append(r.replicas, *client.rw.Writer)
+			}
 			if v.vType == "array" && strings.ToUpper(v.array[0].bulk) == "SET" {
 				for _, c := range r.replicas {
 					c.Write(v.Unmarshal())
+					c.Flush()
 				}
 			}
-			conn.Write(reply)
+			client.rw.Write(reply)
+			client.rw.Flush()
 		}
 		if r.replConf.replication.role == "slave" {
 			addr := strings.Split(conn.RemoteAddr().String(), "]:")
-			if addr[1] != r.replConf.replication.master_port {
-				conn.Write(reply)
+			if addr[1] != r.replConf.replication.master_port || (addr[1] == r.replConf.replication.master_port && v.array[0].bulk == "REPLCONF" && v.array[1].bulk == "GETACK") {
+				client.rw.Write(reply)
+				client.rw.Flush()
 			}
 		}
 	}
 }
 
-//FIXME return slave connection here to main thread to propagate command from master
+// FIXME return slave connection here to main thread to propagate command from master
 func (r *Redis) Handshake() (net.Conn, error) {
 	conn, err := r.PingMaster()
 	if err != nil {
@@ -126,16 +129,15 @@ func (r *Redis) Handshake() (net.Conn, error) {
 		return nil, err
 	}
 
-	err = r.ReplConf(conn, rdbuff)
+	conn, err = r.ReplConf(conn, rdbuff)
 	if err != nil {
 		return nil, err
 	}
 
-	err = r.Psync(conn, rdbuff)
+	conn, err = r.Psync(conn, rdbuff)
 	if err != nil {
 		return nil, err
 	}
-	// conn.Close()
 	return conn, nil
 }
 
@@ -154,44 +156,55 @@ func (r *Redis) PingMaster() (net.Conn, error) {
 	return conn, nil
 }
 
-func (r *Redis) ReplConf(conn net.Conn, buff *bufio.Reader) error {
+func (r *Redis) ReplConf(conn net.Conn, buff *bufio.Reader) (net.Conn, error) {
 	buff.Reset(conn)
 	_, err := conn.Write([]byte(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n%s\r\n", r.replConf.port)))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ok, err := buff.ReadString('\r')
-	// ok, err := bufio.NewReader(conn).ReadString('\r')
 	if ok != "+OK\r" {
-		return fmt.Errorf("error REPLCONF with listening port error, received %s", ok)
+		return nil, fmt.Errorf("error REPLCONF with listening port error, received %s", ok)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	buff.Reset(conn)
 	_, err = conn.Write([]byte("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ok, err = buff.ReadString('\r')
-	// ok, err = bufio.NewReader(conn).ReadString('\r')
 	if ok != "+OK\r" {
-		return fmt.Errorf("error REPLCONF with capa, received %s", ok)
+		return nil, fmt.Errorf("error REPLCONF with capa, received %s", ok)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return conn, nil
 }
 
-func (r *Redis) Psync(conn net.Conn, buff *bufio.Reader) error {
+func (r *Redis) Psync(conn net.Conn, buff *bufio.Reader) (net.Conn, error) {
 	buff.Reset(conn)
 	_, err := conn.Write([]byte("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n"))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	buff.ReadBytes('\n') // read full recync message
+	lenPart, _ := buff.ReadBytes('\r')
+	leng, err := strconv.Atoi(string(lenPart[1 : len(lenPart)-1]))
+	if err != nil {
+		fmt.Println("Error conververting atoi", err)
+	}
+	n, err := buff.Discard(leng)
+	if err != nil {
+		fmt.Printf("error discarding %d bytes - %v\n", n, err)
+		return nil, err
+	}
+	fmt.Printf("Length = %d\nDiscarded bytes - %d\n", leng, n)
+	buff.Reset(conn)
+	return conn, nil
 }
 
 func (r *Redis) ListenPort() net.Listener {

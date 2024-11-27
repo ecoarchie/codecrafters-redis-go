@@ -10,16 +10,14 @@ import (
 func main() {
 	fmt.Println("Logs from your program will appear here!")
 
-	// redisConfig := new(RedisConfig)
 	rdbConf := new(RDBconfig)
 	replConf := new(ReplicationConfig)
 
-	// config := make(map[string]string)
-	dir := flag.String("dir", "", "")
-	dbfilename := flag.String("dbfilename", "", "")
-	host := flag.String("host", "0.0.0.0", "")
-	port := flag.String("port", "6379", "")
-	replicaof := flag.String("replicaof", "", "")
+	dir := flag.String("dir", "", "directory for rdb file")
+	dbfilename := flag.String("dbfilename", "", "rdb file name")
+	host := flag.String("host", "0.0.0.0", "server host addr")
+	port := flag.String("port", "6379", "server port")
+	replicaof := flag.String("replicaof", "", "command to signal that current server stated as a replica")
 
 	flag.Parse()
 
@@ -41,20 +39,21 @@ func main() {
 	}
 
 	r := NewRedis(rdbConf, replConf)
-	if r.replConf.replication.role == "slave" {
-		masterConn, err := r.Handshake()
-		if err != nil {
-			fmt.Println(err)
-		}
-		go r.handleConn(masterConn)
-	}
 	l := r.ListenPort()
 	defer l.Close()
 
 	for {
+		if r.replConf.replication.role == "slave" {
+			masterConn, err := r.Handshake()
+			if err != nil {
+				fmt.Println("server.go/Handshake(): error from Handshake func", err.Error())
+				//TODO try to os.Exit on err
+			}
+			go r.handleConn(masterConn)
+		}
 		conn, err := l.Accept()
 		if err != nil {
-			fmt.Println("Error accepting connection: ", err.Error())
+			fmt.Println("server.go/Accept(): error accepting connection: ", err.Error())
 			os.Exit(1)
 		}
 		go r.handleConn(conn)

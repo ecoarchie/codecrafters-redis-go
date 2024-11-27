@@ -3,23 +3,22 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 )
 
 type Value struct {
-	vType string //type of value
-	str string // store RESP simple string
-	num int // store parsed RESP number
+	vType string  //type of value
+	str   string  // store RESP simple string
+	num   int     // store parsed RESP number
 	bulk  string  // store raw RESP bulk string
 	array []Value // store RESP array
 }
 
 func (v *Value) OK() []byte {
-		v.vType = "str"
-		v.str = "OK"
-		return v.Unmarshal()
+	v.vType = "str"
+	v.str = "OK"
+	return v.Unmarshal()
 }
 
 func (v *Value) Unmarshal() []byte {
@@ -58,6 +57,7 @@ func (v *Value) toBulk() []byte {
 
 func (v *Value) toArray() []byte {
 	if len(v.array) == 0 {
+		fmt.Println("ZERO arr")
 		return []byte("*0\r\n")
 	}
 	begin := fmt.Sprintf("*%d\r\n", len(v.array))
@@ -71,7 +71,6 @@ func (v *Value) toArray() []byte {
 	return []byte(reply)
 }
 
-
 const (
 	STRING  = '+'
 	ERROR   = '-'
@@ -84,11 +83,24 @@ type Parser struct {
 	reader *bufio.Reader
 }
 
-func NewParser(rd io.Reader) *Parser {
+func NewParser(rd *bufio.Reader) *Parser {
 	return &Parser{
-		reader: bufio.NewReader(rd),
+		reader: rd,
 	}
 }
+
+// ORIGINAL
+// func NewParser(rd io.Reader) *Parser {
+// 	return &Parser{
+// 		reader: bufio.NewReader(rd),
+// 	}
+// }
+
+// func NewParser(rd io.Reader) *Parser {
+// 	return &Parser{
+// 		reader: rd.(*bufio.Reader),
+// 	}
+// }
 
 func (p *Parser) readLine() (line []byte, n int, err error) {
 	for {
