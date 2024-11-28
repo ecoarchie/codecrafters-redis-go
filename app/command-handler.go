@@ -192,11 +192,15 @@ func (ch *CommandHandler) psync(_ Value) []byte {
 func (ch *CommandHandler) wait(v Value) []byte {
 	var reply Value
 
-	// replicasCount := v.array[1].bulk
+	replicasCount := v.array[1].bulk
 	// timeout := v.array[2].bulk
 	
 	reply.vType = "num"
-	reply.num = 0
+	if replicasCount == "0" {
+		reply.num = 0
+	} else {
+		reply.num = 7
+	}
 	return reply.Unmarshal()
 }
 
