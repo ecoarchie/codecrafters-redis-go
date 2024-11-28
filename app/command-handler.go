@@ -38,7 +38,7 @@ func (ch *CommandHandler) HandleCommand(v Value) []byte {
 	var repl Value
 	if v.vType == "array" {
 		command := strings.ToLower(v.array[0].bulk)
-		fmt.Println("HANDLE COMMAND: ", command)
+		fmt.Printf("HANDLE COMMAND %s by %s\n", command, ch.replConf.replication.role)
 		switch command {
 		case "ping":
 			return ch.ping(v)
@@ -167,7 +167,8 @@ func (ch *CommandHandler) replconf(v Value) []byte {
 	fmt.Println(arg, "\n", argVal)
 	if arg == "GETACK" && argVal == "*" {
 		repl.vType = "array"
-		repl.array = append(repl.array, Value{vType: "bulk", bulk: "REPLCONF"}, Value{vType: "bulk", bulk: "ACK"}, Value{vType: "bulk", bulk: "0"})
+		offset := strconv.Itoa(ch.replConf.replication.offset)
+		repl.array = append(repl.array, Value{vType: "bulk", bulk: "REPLCONF"}, Value{vType: "bulk", bulk: "ACK"}, Value{vType: "bulk", bulk: offset})
 		return repl.Unmarshal()
 	}
 	return repl.OK()

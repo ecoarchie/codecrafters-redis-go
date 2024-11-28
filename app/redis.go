@@ -24,6 +24,7 @@ type ReplicationConfig struct {
 		master_repl_offset int
 		master_host        string
 		master_port        string
+		offset             int
 	}
 }
 
@@ -72,20 +73,29 @@ func NewRedis(rdb *RDBconfig, repl *ReplicationConfig) *Redis {
 	}
 }
 
-func (r *Redis) handleConn(conn net.Conn) {
+func (r *Redis) handleConn(conn net.Conn, rd *bufio.Reader) {
 	defer conn.Close()
 
 	addr := strings.Split(conn.RemoteAddr().String(), "]:")
 	if addr[1] == r.replConf.replication.master_port {
-		fmt.Println("HANDLING request from MASTER PORT")
-		fmt.Println("CONN: ", conn)
+		// fmt.Println("HANDLING request from MASTER PORT")
+		// fmt.Println("CONN: ", conn)
 	}
-
-	client := NewClient(conn)
+	
+	var client *Client
+	if rd == nil {
+		client = NewClient(bufio.NewReader(conn), bufio.NewWriter(conn))
+	} else {
+		client = NewClient(rd, bufio.NewWriter(conn))
+	}
+	// fmt.Printf("Buffered reader: %d\n", client.rw.Available())
+	// client.rw.Reader.Reset(conn)
+	// client.rw.Writer.Reset(conn)
 	for {
 		parser := NewParser(client.rw.Reader)
 		v, err := parser.Parse()
-		if err != nil {
+		fmt.Printf("V = %+v\n", v)
+		if err != nil { //EOF so exit
 			fmt.Printf("Error is %+v\n", err)
 			return
 		}
@@ -94,17 +104,18 @@ func (r *Redis) handleConn(conn net.Conn) {
 			if v.vType == "array" && strings.ToUpper(v.array[0].bulk) == "PSYNC" {
 				r.replicas = append(r.replicas, *client.rw.Writer)
 			}
-			if v.vType == "array" && strings.ToUpper(v.array[0].bulk) == "SET" {
-				for _, c := range r.replicas {
-					c.Write(v.Unmarshal())
-					c.Flush()
-				}
-			}
 			client.rw.Write(reply)
 			client.rw.Flush()
 		}
+		if v.vType == "array" && strings.ToUpper(v.array[0].bulk) == "SET" {
+			for _, c := range r.replicas {
+				c.Write(v.Unmarshal())
+				c.Flush()
+			}
+		}
 		if r.replConf.replication.role == "slave" {
 			addr := strings.Split(conn.RemoteAddr().String(), "]:")
+			r.replConf.replication.offset += len(v.Unmarshal())
 			if addr[1] != r.replConf.replication.master_port || (addr[1] == r.replConf.replication.master_port && v.array[0].bulk == "REPLCONF" && v.array[1].bulk == "GETACK") {
 				client.rw.Write(reply)
 				client.rw.Flush()
@@ -114,31 +125,32 @@ func (r *Redis) handleConn(conn net.Conn) {
 }
 
 // FIXME return slave connection here to main thread to propagate command from master
-func (r *Redis) Handshake() (net.Conn, error) {
+func (r *Redis) Handshake() (net.Conn, *bufio.Reader, error) {
 	conn, err := r.PingMaster()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rdbuff := bufio.NewReader(conn)
 	ok, err := rdbuff.ReadString('\r')
 	if ok != "+PONG\r" {
 		fmt.Println("ok is ", ok)
-		return nil, fmt.Errorf("didn't receive PONG, received %s instead", ok)
+		return nil, nil, fmt.Errorf("didn't receive PONG, received %s instead", ok)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	conn, err = r.ReplConf(conn, rdbuff)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	conn, err = r.Psync(conn, rdbuff)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return conn, nil
+	// fmt.Printf("Buffered bytes: %d\n", rdbuff.Buffered())
+	return conn, rdbuff, nil
 }
 
 func (r *Redis) PingMaster() (net.Conn, error) {
@@ -182,6 +194,7 @@ func (r *Redis) ReplConf(conn net.Conn, buff *bufio.Reader) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	buff.Reset(conn)
 	return conn, nil
 }
 
@@ -191,9 +204,10 @@ func (r *Redis) Psync(conn net.Conn, buff *bufio.Reader) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	
 	buff.ReadBytes('\n') // read full recync message
-	lenPart, _ := buff.ReadBytes('\r')
-	leng, err := strconv.Atoi(string(lenPart[1 : len(lenPart)-1]))
+	lenPart, _ := buff.ReadBytes('\n')
+	leng, err := strconv.Atoi(string(lenPart[1 : len(lenPart)-2]))
 	if err != nil {
 		fmt.Println("Error conververting atoi", err)
 	}
@@ -202,8 +216,8 @@ func (r *Redis) Psync(conn net.Conn, buff *bufio.Reader) (net.Conn, error) {
 		fmt.Printf("error discarding %d bytes - %v\n", n, err)
 		return nil, err
 	}
-	fmt.Printf("Length = %d\nDiscarded bytes - %d\n", leng, n)
-	buff.Reset(conn)
+	// fmt.Printf("Length = %d\nDiscarded bytes - %d\n", leng, n)
+	// fmt.Printf("Buffered bytes: %d\n", buff.Buffered())
 	return conn, nil
 }
 

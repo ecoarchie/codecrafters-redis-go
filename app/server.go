@@ -44,18 +44,18 @@ func main() {
 
 	for {
 		if r.replConf.replication.role == "slave" {
-			masterConn, err := r.Handshake()
+			masterConn, rd, err := r.Handshake()
 			if err != nil {
 				fmt.Println("server.go/Handshake(): error from Handshake func", err.Error())
 				//TODO try to os.Exit on err
 			}
-			go r.handleConn(masterConn)
+			go r.handleConn(masterConn, rd)
 		}
 		conn, err := l.Accept()
 		if err != nil {
 			fmt.Println("server.go/Accept(): error accepting connection: ", err.Error())
 			os.Exit(1)
 		}
-		go r.handleConn(conn)
+		go r.handleConn(conn, nil)
 	}
 }
