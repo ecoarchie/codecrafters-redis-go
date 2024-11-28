@@ -58,6 +58,8 @@ func (ch *CommandHandler) HandleCommand(v Value) []byte {
 			return ch.replconf(v)
 		case "psync":
 			return ch.psync(v)
+		case "wait":
+			return ch.wait(v)
 		}
 	} else {
 		return []byte("$5\r\nERROR\r\n")
@@ -185,6 +187,17 @@ func (ch *CommandHandler) psync(_ Value) []byte {
 	res = append(res, []byte(fmt.Sprintf("$%d\r\n", len(decoded)))...)
 	res = append(res, decoded...) //decoded RDB hash is not a bulk string so without CRLF
 	return res
+}
+
+func (ch *CommandHandler) wait(v Value) []byte {
+	var reply Value
+
+	// replicasCount := v.array[1].bulk
+	// timeout := v.array[2].bulk
+	
+	reply.vType = "num"
+	reply.num = 0
+	return reply.Unmarshal()
 }
 
 func (ch *CommandHandler) setValue(key, val string, opts setOptions) {
