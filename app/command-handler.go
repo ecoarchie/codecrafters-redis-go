@@ -199,7 +199,7 @@ func (ch *CommandHandler) wait(v Value) []byte {
 	if replicasCount == "0" {
 		reply.num = 0
 	} else {
-		reply.num = 7
+		reply.num = ch.replConf.replication.connected_slaves
 	}
 	return reply.Unmarshal()
 }

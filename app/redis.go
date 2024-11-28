@@ -22,6 +22,7 @@ type ReplicationConfig struct {
 		role               string
 		master_replid      string
 		master_repl_offset int
+		connected_slaves int
 		master_host        string
 		master_port        string
 		offset             int
@@ -103,6 +104,7 @@ func (r *Redis) handleConn(conn net.Conn, rd *bufio.Reader) {
 		if r.replConf.replication.role == "master" {
 			if v.vType == "array" && strings.ToUpper(v.array[0].bulk) == "PSYNC" {
 				r.replicas = append(r.replicas, *client.rw.Writer)
+				r.replConf.replication.connected_slaves += 1
 			}
 			client.rw.Write(reply)
 			client.rw.Flush()
